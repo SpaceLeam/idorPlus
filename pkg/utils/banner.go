@@ -1,12 +1,15 @@
 package utils
 
-import "github.com/pterm/pterm"
+import (
+	"github.com/pterm/pterm"
+	"github.com/pterm/pterm/putils"
+)
 
 // PrintBanner prints the IdorPlus banner
 func PrintBanner(version string) {
 	banner := pterm.DefaultBigText.WithLetters(
-		pterm.NewLettersFromStringWithStyle("IDOR", pterm.NewStyle(pterm.FgLightCyan)),
-		pterm.NewLettersFromStringWithStyle("PLUS", pterm.NewStyle(pterm.FgLightMagenta)),
+		putils.LettersFromStringWithStyle("IDOR", pterm.NewStyle(pterm.FgLightCyan)),
+		putils.LettersFromStringWithStyle("PLUS", pterm.NewStyle(pterm.FgLightMagenta)),
 	)
 	banner.Render()
 

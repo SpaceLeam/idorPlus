@@ -105,7 +105,7 @@ func (r *Reporter) generateJSON(filename string, report *Report) error {
 
 // generateMarkdown outputs Markdown format
 func (r *Reporter) generateMarkdown(filename string, report *Report) error {
-	content := fmt.Sprintf("# IDOR Scan Report\n\n")
+	content := "# IDOR Scan Report\n\n"
 	content += fmt.Sprintf("**Scan Time:** %s\n", report.ScanTime.Format(time.RFC3339))
 	content += fmt.Sprintf("**Duration:** %s\n", report.Duration)
 	content += fmt.Sprintf("**Vulnerabilities Found:** %d\n\n", report.VulnCount)

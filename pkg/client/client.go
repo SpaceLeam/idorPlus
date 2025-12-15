@@ -187,3 +187,8 @@ func (c *SmartClient) SetWAFBypassMode(mode string) {
 	defer c.mu.Unlock()
 	c.wafBypass.Mode = mode
 }
+
+// SetDefaultHeader sets a default header for all requests
+func (c *SmartClient) SetDefaultHeader(key, value string) {
+	c.client.SetHeader(key, value)
+}

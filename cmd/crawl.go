@@ -29,7 +29,7 @@ func init() {
 
 	crawlCmd.Flags().StringP("url", "u", "", "Target URL to crawl (required)")
 	crawlCmd.Flags().StringP("cookies", "c", "", "Session cookies")
-	crawlCmd.Flags().IntP("depth", "d", 2, "Crawl depth")
+	crawlCmd.Flags().IntP("depth", "D", 2, "Crawl depth")
 	crawlCmd.Flags().IntP("max-pages", "m", 100, "Maximum pages to crawl")
 	crawlCmd.Flags().StringP("output", "o", "endpoints.txt", "Output file for discovered endpoints")
 	crawlCmd.Flags().Bool("js", true, "Parse JavaScript files for endpoints")

@@ -52,6 +52,8 @@ func init() {
 	scanCmd.Flags().Bool("auth-matrix", false, "Enable auth matrix testing (requires -C)")
 	scanCmd.Flags().Bool("pii", true, "Enable PII detection")
 	scanCmd.Flags().Int("delay", 100, "Delay between requests in milliseconds")
+	scanCmd.Flags().StringArrayP("header", "H", nil, "Custom headers (e.g. -H 'Authorization: Bearer token')")
+	scanCmd.Flags().StringP("auth", "a", "", "Bearer token for Authorization header")
 
 	scanCmd.MarkFlagRequired("url")
 }
@@ -71,6 +73,8 @@ func runScan(cmd *cobra.Command, args []string) {
 	authMatrix, _ := cmd.Flags().GetBool("auth-matrix")
 	piiCheck, _ := cmd.Flags().GetBool("pii")
 	delay, _ := cmd.Flags().GetInt("delay")
+	customHeaders, _ := cmd.Flags().GetStringArray("header")
+	bearerToken, _ := cmd.Flags().GetString("auth")
 
 	utils.Info.Printf("Target: %s\n", url)
 	utils.Info.Printf("Mode: %s | Threads: %d | Method: %s\n", bypass, threads, method)
@@ -105,6 +109,23 @@ func runScan(cmd *cobra.Command, args []string) {
 	if len(proxyList) > 0 {
 		c.SetProxies(proxyList)
 		utils.Info.Printf("Using %d proxies\n", len(proxyList))
+	}
+
+	// Add custom headers
+	for _, h := range customHeaders {
+		parts := strings.SplitN(h, ":", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			val := strings.TrimSpace(parts[1])
+			c.SetDefaultHeader(key, val)
+			utils.Info.Printf("Custom header: %s\n", key)
+		}
+	}
+
+	// Add bearer token
+	if bearerToken != "" {
+		c.SetDefaultHeader("Authorization", "Bearer "+bearerToken)
+		utils.Info.Println("Using Bearer token authentication")
 	}
 
 	// Generate or load payloads
