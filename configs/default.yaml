@@ -1,0 +1,24 @@
+# IdorPlus Configuration
+scanner:
+  threads: 10
+  timeout: 10s
+  max_retries: 3
+  delay: 100ms
+  
+waf_bypass:
+  enabled: true
+  mode: normal  # normal, aggressive, stealth
+  headers:
+    X-Forwarded-For: 127.0.0.1
+    X-Originating-IP: 127.0.0.1
+    X-Real-IP: 127.0.0.1
+  
+detection:
+  threshold: 0.8
+  check_pii: true
+  blind_idor: false
+  
+output:
+  format: json  # json, markdown, html
+  verbose: true
+  save_responses: false
