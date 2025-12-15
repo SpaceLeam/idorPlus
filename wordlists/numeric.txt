@@ -1,0 +1,22 @@
+# Common Numeric IDs
+0
+1
+2
+3
+4
+5
+10
+100
+1000
+10000
+123
+1234
+12345
+999
+9999
+99999
+admin
+test
+demo
+guest
+user

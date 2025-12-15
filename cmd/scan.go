@@ -1,7 +1,12 @@
 package cmd
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"idorplus/pkg/analyzer"
 	"idorplus/pkg/client"
@@ -11,109 +16,290 @@ import (
 	"idorplus/pkg/reporter"
 	"idorplus/pkg/utils"
 
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
 
 var scanCmd = &cobra.Command{
 	Use:   "scan",
 	Short: "Start IDOR scanning",
-	Run: func(cmd *cobra.Command, args []string) {
-		url, _ := cmd.Flags().GetString("url")
-		cookies, _ := cmd.Flags().GetString("cookies")
-		threads, _ := cmd.Flags().GetInt("threads")
-		bypass, _ := cmd.Flags().GetString("bypass")
+	Long: `Scan a target URL for IDOR vulnerabilities.
 
-		utils.Info.Println("Starting scan on:", url)
+Use {ID} as a placeholder in the URL where you want to fuzz:
+  idorplus scan -u "https://api.target.com/users/{ID}/profile" -c "session=token"
 
-		// Load Config
-		cfg, _ := utils.LoadConfig("configs/default.yaml")
-		if cfg == nil {
-			cfg = &utils.Config{} // Fallback
-		}
-
-		// Override config with flags
-		cfg.Scanner.Threads = threads
-		cfg.WAFBypass.Mode = bypass
-		if bypass != "none" {
-			cfg.WAFBypass.Enabled = true
-		}
-
-		// Init Client
-		c := client.NewSmartClient(cfg)
-		c.GetSessionManager().AddSession("attacker", cookies)
-
-		// Baseline Request (to get 403/404 or normal response)
-		// We assume the URL provided HAS the ID we want to fuzz.
-		// e.g. http://target.com/user/123
-		// We need to identify WHERE the ID is.
-		// For this MVP, let's assume the user puts a placeholder {ID} or we just fuzz the last path segment if numeric.
-
-		targetURL := url
-		if !strings.Contains(url, "{ID}") {
-			utils.Warning.Println("No {ID} placeholder found. Appending payloads to end of URL.")
-		}
-
-		// Analyzer & Generator
-		// For now, let's assume Numeric ID type for simplicity or auto-detect from the URL if possible.
-		// Real implementation would analyze the existing ID in the URL.
-		gen := generator.NewPayloadGenerator(analyzer.TypeNumeric)
-		payloads := gen.Generate(100) // Generate 100 payloads
-
-		// Init Detector
-		// We need a baseline. Let's make a request to a non-existent ID to get a baseline error.
-		baselineURL := strings.Replace(targetURL, "{ID}", "999999999", 1)
-		baselineResp, err := c.Request().Get(baselineURL)
-		if err != nil {
-			utils.Error.Println("Failed to get baseline:", err)
-			return
-		}
-
-		comp := analyzer.NewResponseComparator(baselineResp)
-		det := detector.NewIDORDetector(comp, 0.8)
-
-		// Init Fuzzer
-		fe := fuzzer.NewFuzzEngine(c, threads, det)
-		fe.Start()
-
-		// Feed Jobs
-		go func() {
-			for _, p := range payloads {
-				u := strings.Replace(targetURL, "{ID}", p, 1)
-				if !strings.Contains(targetURL, "{ID}") {
-					u = targetURL + "/" + p // Simple append fallback
-				}
-
-				fe.Queue <- &fuzzer.FuzzJob{
-					URL:     u,
-					Method:  "GET",
-					Payload: p,
-				}
-			}
-			fe.Stop()
-		}()
-
-		// Collect Results
-		rep := reporter.NewReporter("json")
-		for res := range fe.Results {
-			if res.IsVulnerable {
-				utils.Success.Printf("VULNERABLE: %s (Status: %d)\n", res.Job.URL, res.Response.StatusCode())
-				rep.AddFinding(res)
-			} else {
-				// utils.Info.Printf("Checked: %s (Status: %d)\n", res.Job.URL, res.Response.StatusCode())
-			}
-		}
-
-		// Save Report
-		rep.GenerateReport("idor_report.json")
-		utils.Info.Println("Scan complete. Report saved to idor_report.json")
-	},
+The scanner will:
+  1. Establish baseline responses
+  2. Generate payloads based on detected ID type
+  3. Fuzz the ID parameter with WAF bypass techniques
+  4. Detect vulnerable endpoints using multiple heuristics`,
+	Run: runScan,
 }
 
 func init() {
 	rootCmd.AddCommand(scanCmd)
-	scanCmd.Flags().StringP("url", "u", "", "Target URL with {ID} placeholder")
+
+	scanCmd.Flags().StringP("url", "u", "", "Target URL with {ID} placeholder (required)")
 	scanCmd.Flags().StringP("cookies", "c", "", "Session cookies")
-	scanCmd.Flags().IntP("threads", "t", 10, "Number of threads")
-	scanCmd.Flags().StringP("bypass", "b", "normal", "WAF bypass mode")
+	scanCmd.Flags().StringP("cookies-b", "C", "", "Second user cookies for auth matrix testing")
+	scanCmd.Flags().IntP("threads", "t", 10, "Number of concurrent workers")
+	scanCmd.Flags().StringP("wordlist", "w", "", "Custom wordlist file")
+	scanCmd.Flags().IntP("count", "n", 100, "Number of payloads to generate (if no wordlist)")
+	scanCmd.Flags().StringP("bypass", "b", "normal", "WAF bypass mode: none, normal, aggressive, stealth")
+	scanCmd.Flags().StringP("method", "m", "GET", "HTTP method: GET, POST, PUT, DELETE, PATCH")
+	scanCmd.Flags().StringP("output", "o", "idor_report.json", "Output report file")
+	scanCmd.Flags().Float64P("threshold", "T", 0.8, "Similarity threshold for detection (0.0-1.0)")
+	scanCmd.Flags().Bool("auth-matrix", false, "Enable auth matrix testing (requires -C)")
+	scanCmd.Flags().Bool("pii", true, "Enable PII detection")
+	scanCmd.Flags().Int("delay", 100, "Delay between requests in milliseconds")
+
 	scanCmd.MarkFlagRequired("url")
+}
+
+func runScan(cmd *cobra.Command, args []string) {
+	// Parse flags
+	url, _ := cmd.Flags().GetString("url")
+	cookies, _ := cmd.Flags().GetString("cookies")
+	cookiesB, _ := cmd.Flags().GetString("cookies-b")
+	threads, _ := cmd.Flags().GetInt("threads")
+	wordlistPath, _ := cmd.Flags().GetString("wordlist")
+	count, _ := cmd.Flags().GetInt("count")
+	bypass, _ := cmd.Flags().GetString("bypass")
+	method, _ := cmd.Flags().GetString("method")
+	outputFile, _ := cmd.Flags().GetString("output")
+	threshold, _ := cmd.Flags().GetFloat64("threshold")
+	authMatrix, _ := cmd.Flags().GetBool("auth-matrix")
+	piiCheck, _ := cmd.Flags().GetBool("pii")
+	delay, _ := cmd.Flags().GetInt("delay")
+
+	utils.Info.Printf("Target: %s\n", url)
+	utils.Info.Printf("Mode: %s | Threads: %d | Method: %s\n", bypass, threads, method)
+
+	// Load config
+	cfg, err := utils.LoadConfig("configs/default.yaml")
+	if err != nil {
+		utils.Warning.Printf("Config not found, using defaults\n")
+		cfg = getDefaultConfig()
+	}
+
+	// Override config with flags
+	cfg.Scanner.Threads = threads
+	cfg.WAFBypass.Mode = bypass
+	cfg.WAFBypass.Enabled = bypass != "none"
+	cfg.Detection.Threshold = threshold
+	cfg.Detection.CheckPII = piiCheck
+	cfg.Scanner.Delay = fmt.Sprintf("%dms", delay)
+
+	// Initialize client
+	c := client.NewSmartClient(cfg)
+
+	// Set up sessions
+	if cookies != "" {
+		c.GetSessionManager().AddSession("attacker", cookies)
+	}
+	if cookiesB != "" {
+		c.GetSessionManager().AddSession("victim", cookiesB)
+	}
+
+	// Set proxies if provided
+	if len(proxyList) > 0 {
+		c.SetProxies(proxyList)
+		utils.Info.Printf("Using %d proxies\n", len(proxyList))
+	}
+
+	// Generate or load payloads
+	var payloads []string
+	if wordlistPath != "" {
+		payloads, err = utils.LoadWordlist(wordlistPath)
+		if err != nil {
+			utils.Error.Printf("Failed to load wordlist: %v\n", err)
+			return
+		}
+		utils.Info.Printf("Loaded %d payloads from wordlist\n", len(payloads))
+	} else {
+		// Detect ID type from URL
+		existingID := extractExistingID(url)
+		idType := analyzer.TypeNumeric
+		if existingID != "" {
+			ia := analyzer.NewIdentifierAnalyzer()
+			idType = ia.DetectType(existingID)
+			utils.Info.Printf("Detected ID type: %v\n", idType)
+		}
+
+		gen := generator.NewPayloadGenerator(idType)
+		payloads = gen.Generate(count)
+		utils.Info.Printf("Generated %d payloads\n", len(payloads))
+	}
+
+	// Get baselines
+	utils.Info.Println("Establishing baselines...")
+
+	// Invalid baseline (non-existent resource)
+	invalidURL := replaceID(url, "999999999999999")
+	invalidResp, err := c.Request().Get(invalidURL)
+	if err != nil {
+		utils.Error.Printf("Failed to get invalid baseline: %v\n", err)
+		return
+	}
+	utils.Debug.Printf("Invalid baseline: Status %d, Length %d\n", invalidResp.StatusCode(), len(invalidResp.Body()))
+
+	// Valid baseline (if we have an existing ID in the URL)
+	var validResp = invalidResp // Fallback
+	existingID := extractExistingID(url)
+	if existingID != "" && cookies != "" {
+		validURL := replaceID(url, existingID)
+		vr, err := c.Request().Get(validURL)
+		if err == nil {
+			validResp = vr
+			utils.Debug.Printf("Valid baseline: Status %d, Length %d\n", validResp.StatusCode(), len(validResp.Body()))
+		}
+	}
+
+	// Create detector
+	det := detector.NewIDORDetector(validResp, invalidResp, threshold, piiCheck)
+
+	// Auth Matrix testing
+	if authMatrix && cookiesB != "" {
+		utils.PrintSection("Auth Matrix Testing")
+		amt := detector.NewAuthMatrixTester(c)
+		amt.AddSession("user_a", cookies)
+		amt.AddSession("user_b", cookiesB)
+
+		testURL := replaceID(url, existingID)
+		result := amt.TestEndpoint(testURL, method)
+		amt.PrintMatrix(result)
+	}
+
+	// Setup signal handling
+	ctx, cancel := context.WithCancel(context.Background())
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		utils.Warning.Println("\nInterrupt received, stopping scan...")
+		cancel()
+	}()
+
+	// Initialize fuzzer
+	fe := fuzzer.NewFuzzEngine(c, threads, det)
+	fe.Start()
+
+	// Setup progress bar
+	progressBar, _ := pterm.DefaultProgressbar.
+		WithTotal(len(payloads)).
+		WithTitle("Scanning").
+		WithShowElapsedTime(true).
+		WithShowCount(true).
+		Start()
+
+	// Feed jobs in goroutine
+	go func() {
+	JobLoop:
+		for i, p := range payloads {
+			select {
+			case <-ctx.Done():
+				break JobLoop
+			default:
+				targetURL := replaceID(url, p)
+				job := &fuzzer.FuzzJob{
+					ID:      i,
+					URL:     targetURL,
+					Method:  method,
+					Payload: p,
+					Session: "attacker",
+				}
+				if !fe.Submit(job) {
+					break JobLoop
+				}
+			}
+		}
+		fe.CloseQueue()
+		fe.WaitAndClose() // Wait for workers and close Results channel
+	}()
+
+	// Collect results
+	rep := reporter.NewReporter("json")
+	done := make(chan bool)
+
+	go func() {
+		for result := range fe.Results {
+			progressBar.Increment()
+
+			if result.IsVulnerable {
+				progressBar.UpdateTitle(pterm.Red("VULNERABLE FOUND!"))
+				utils.PrintVulnerable(result.Job.URL, result.StatusCode)
+				rep.AddFinding(result)
+			}
+		}
+		done <- true
+	}()
+
+	// Wait for completion
+	<-done
+	progressBar.Stop()
+
+	// Print stats
+	fe.Stats.Print()
+
+	// Save report
+	if err := rep.GenerateReport(outputFile); err != nil {
+		utils.Error.Printf("Failed to save report: %v\n", err)
+	} else {
+		utils.Success.Printf("Report saved to %s\n", outputFile)
+	}
+
+	// Summary
+	if fe.Stats.GetVulnCount() > 0 {
+		utils.Error.Printf("\n%d VULNERABILITIES FOUND!\n", fe.Stats.GetVulnCount())
+	} else {
+		utils.Success.Println("\nNo vulnerabilities found")
+	}
+}
+
+func getDefaultConfig() *utils.Config {
+	return &utils.Config{
+		Scanner: utils.ScannerConfig{
+			Threads:    10,
+			Timeout:    "10s",
+			MaxRetries: 3,
+			Delay:      "100ms",
+		},
+		WAFBypass: utils.WAFBypassConfig{
+			Enabled: true,
+			Mode:    "normal",
+			Headers: map[string]string{
+				"X-Forwarded-For": "127.0.0.1",
+				"X-Real-IP":       "127.0.0.1",
+			},
+		},
+		Detection: utils.DetectionConfig{
+			Threshold: 0.8,
+			CheckPII:  true,
+			BlindIDOR: false,
+		},
+		Output: utils.OutputConfig{
+			Format:  "json",
+			Verbose: true,
+		},
+	}
+}
+
+func replaceID(url, id string) string {
+	if strings.Contains(url, "{ID}") {
+		return strings.Replace(url, "{ID}", id, 1)
+	}
+	// Fallback: append to URL
+	if strings.HasSuffix(url, "/") {
+		return url + id
+	}
+	return url + "/" + id
+}
+
+func extractExistingID(url string) string {
+	// Try to find an existing ID in the URL
+	if strings.Contains(url, "{ID}") {
+		return ""
+	}
+	return utils.ExtractIDFromURL(url)
 }

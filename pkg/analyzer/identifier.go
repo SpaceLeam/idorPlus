@@ -24,24 +24,27 @@ func NewIdentifierAnalyzer() *IdentifierAnalyzer {
 }
 
 func (ia *IdentifierAnalyzer) DetectType(id string) IDType {
-	// UUID check
-	if _, err := uuid.Parse(id); err == nil {
-		return TypeUUID
-	}
-
-	// Numeric check
+	// Numeric check first (most common)
 	if matched, _ := regexp.MatchString(`^\d+$`, id); matched {
 		return TypeNumeric
 	}
 
-	// MD5 check (32 hex chars)
-	if matched, _ := regexp.MatchString(`^[a-f0-9]{32}$`, id); matched {
-		return TypeMD5
+	// MD5 check (32 hex chars, case-insensitive) - before UUID to avoid false match
+	if matched, _ := regexp.MatchString(`^[a-fA-F0-9]{32}$`, id); matched {
+		// Additional check: UUIDs have dashes, MD5 does not
+		if !regexp.MustCompile(`-`).MatchString(id) {
+			return TypeMD5
+		}
 	}
 
-	// SHA1 check (40 hex chars)
-	if matched, _ := regexp.MatchString(`^[a-f0-9]{40}$`, id); matched {
+	// SHA1 check (40 hex chars, case-insensitive)
+	if matched, _ := regexp.MatchString(`^[a-fA-F0-9]{40}$`, id); matched {
 		return TypeSHA1
+	}
+
+	// UUID check (must contain dashes in standard format)
+	if _, err := uuid.Parse(id); err == nil {
+		return TypeUUID
 	}
 
 	// Base64 check (Simple heuristic)
