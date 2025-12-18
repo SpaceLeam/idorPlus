@@ -54,6 +54,7 @@ func init() {
 	scanCmd.Flags().Int("delay", 100, "Delay between requests in milliseconds")
 	scanCmd.Flags().StringArrayP("header", "H", nil, "Custom headers (e.g. -H 'Authorization: Bearer token')")
 	scanCmd.Flags().StringP("auth", "a", "", "Bearer token for Authorization header")
+	scanCmd.Flags().BoolP("insecure", "k", false, "Skip SSL verification")
 
 	scanCmd.MarkFlagRequired("url")
 }
@@ -75,6 +76,7 @@ func runScan(cmd *cobra.Command, args []string) {
 	delay, _ := cmd.Flags().GetInt("delay")
 	customHeaders, _ := cmd.Flags().GetStringArray("header")
 	bearerToken, _ := cmd.Flags().GetString("auth")
+	skipSSL, _ := cmd.Flags().GetBool("insecure")
 
 	utils.Info.Printf("Target: %s\n", url)
 	utils.Info.Printf("Mode: %s | Threads: %d | Method: %s\n", bypass, threads, method)
@@ -93,6 +95,9 @@ func runScan(cmd *cobra.Command, args []string) {
 	cfg.Detection.Threshold = threshold
 	cfg.Detection.CheckPII = piiCheck
 	cfg.Scanner.Delay = fmt.Sprintf("%dms", delay)
+	if skipSSL {
+		cfg.Scanner.SkipSSL = true
+	}
 
 	// Initialize client
 	c := client.NewSmartClient(cfg)
@@ -285,6 +290,7 @@ func getDefaultConfig() *utils.Config {
 			Timeout:    "10s",
 			MaxRetries: 3,
 			Delay:      "100ms",
+			SkipSSL:    false,
 		},
 		WAFBypass: utils.WAFBypassConfig{
 			Enabled: true,

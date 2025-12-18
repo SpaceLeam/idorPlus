@@ -49,8 +49,12 @@ func NewSmartClient(config *utils.Config) *SmartClient {
 	r.SetRetryWaitTime(500 * time.Millisecond)
 	r.SetRetryMaxWaitTime(5 * time.Second)
 
-	// Disable TLS verification for testing
-	r.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true})
+	// Set TLS verification
+	skipSSL := false
+	if config != nil {
+		skipSSL = config.Scanner.SkipSSL
+	}
+	r.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: skipSSL})
 
 	// Initialize WAF Bypass
 	var wafMode string
