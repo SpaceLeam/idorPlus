@@ -8,10 +8,10 @@ import (
 
 // NewCustomTransport creates a transport with custom TLS configuration
 // to mimic a real browser and bypass basic TLS fingerprinting.
-func NewCustomTransport() *http.Transport {
+func NewCustomTransport(verifyTLS bool) *http.Transport {
 	return &http.Transport{
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: !verifyTLS,
 			MinVersion:         tls.VersionTLS12,
 			CipherSuites: []uint16{
 				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,

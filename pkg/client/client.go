@@ -28,8 +28,13 @@ type SmartClient struct {
 func NewSmartClient(config *utils.Config) *SmartClient {
 	r := resty.New()
 
+	verifyTLS := false
+	if config != nil {
+		verifyTLS = config.Scanner.VerifyTLS
+	}
+
 	// Set custom transport with TLS spoofing
-	r.SetTransport(NewCustomTransport())
+	r.SetTransport(NewCustomTransport(verifyTLS))
 
 	// Parse and set timeout
 	timeout := 10 * time.Second
@@ -50,7 +55,7 @@ func NewSmartClient(config *utils.Config) *SmartClient {
 	r.SetRetryMaxWaitTime(5 * time.Second)
 
 	// Disable TLS verification for testing
-	r.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true})
+	r.SetTLSClientConfig(&tls.Config{InsecureSkipVerify: !verifyTLS})
 
 	// Initialize WAF Bypass
 	var wafMode string
@@ -175,7 +180,11 @@ func (c *SmartClient) SetProxies(proxies []string) {
 
 	// Update transport with proxy
 	if c.proxyManager.IsEnabled() {
-		transport := NewCustomTransport()
+		verifyTLS := false
+		if c.config != nil {
+			verifyTLS = c.config.Scanner.VerifyTLS
+		}
+		transport := NewCustomTransport(verifyTLS)
 		transport.Proxy = c.proxyManager.GetProxyFunc()
 		c.client.SetTransport(transport)
 	}
