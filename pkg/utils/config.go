@@ -19,6 +19,7 @@ type ScannerConfig struct {
 	Timeout    string `yaml:"timeout"`
 	MaxRetries int    `yaml:"max_retries"`
 	Delay      string `yaml:"delay"`
+	VerifyTLS  bool   `yaml:"verify_tls"`
 }
 
 type WAFBypassConfig struct {
