@@ -3,10 +3,10 @@ package reporter
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"idorplus/pkg/fuzzer"
+	"idorplus/pkg/utils"
 
 	"github.com/pterm/pterm"
 )
@@ -100,7 +100,7 @@ func (r *Reporter) generateJSON(filename string, report *Report) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filename, data, 0644)
+	return utils.WriteFile(filename, data)
 }
 
 // generateMarkdown outputs Markdown format
@@ -125,7 +125,7 @@ func (r *Reporter) generateMarkdown(filename string, report *Report) error {
 		}
 	}
 
-	return os.WriteFile(filename, []byte(content), 0644)
+	return utils.WriteFile(filename, []byte(content))
 }
 
 // PrintSummary prints a summary of findings to console
