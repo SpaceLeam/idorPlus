@@ -21,11 +21,3 @@ func InitLogger(debugMode bool) {
 		pterm.DisableDebugMessages()
 	}
 }
-
-// PrintBanner prints the tool banner
-func PrintBanner(version string) {
-	pterm.DefaultHeader.
-		WithBackgroundStyle(pterm.NewStyle(pterm.BgLightBlue)).
-		WithMargin(10).
-		Printf("IdorPlus v%s - Advanced IDOR Hunter\n", version)
-}

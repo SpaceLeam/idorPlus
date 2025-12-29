@@ -3,7 +3,6 @@ package client
 import (
 	"math/rand"
 	"net/http"
-	"time"
 )
 
 type WAFBypass struct {
@@ -36,8 +35,7 @@ func (w *WAFBypass) Apply(req *http.Request) {
 		req.Header.Set(k, v)
 	}
 
-	// 2. Rotate User-Agent
-	rand.Seed(time.Now().UnixNano())
+	// 2. Rotate User-Agent (Go 1.20+ auto-seeds)
 	ua := w.UserAgents[rand.Intn(len(w.UserAgents))]
 	req.Header.Set("User-Agent", ua)
 
